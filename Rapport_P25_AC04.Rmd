@@ -1,0 +1,1650 @@
+---
+title: "Bilan"
+author: "MAROS Enzo, PRUVOST LAMY Andréa, RANDRETH Aaron, ZHANG Anxian"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+   toc: true
+   toc-location: left
+   cap-location: margin
+   code-fold: false
+   highlight-style: github
+   code-copy: true
+   html-math-method: katex
+   number-sections: true
+   code-line-numbers: false
+   include-after-body:
+        text: |
+          <script>
+          const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+          for (var i=0; i<noterefs.length; i++) {
+            const ref = noterefs[i];
+            ref.onclick = function(){ref._tippy.show();return false;};
+          }
+          </script>
+   embed-resources: true
+   self-contained-math: true
+---
+
+# TP Projet AC04
+
+## Introduction
+
+Ce document présente le code, les résultats et les conclusions du projet de
+régression linéaire réalisé dans le cadre de l'UV AC04, *Méthodes Statistiques
+pour l'Ingénieur*.
+
+Les membres de l'équipe sont présentés dans le tableau ci-dessous, avec le
+pourcentage de contribution de chacun au projet (Question 0). La collaboration a
+été équitable, les sessions de travail ont été organisées ensemble, et les
+réflexions ont été partagées en tous temps. Chaque membre a ainsi contribué
+de manière parfaitement égale à la réalisation de ce projet.
+
+| Nom et prénom                | Contribution |
+|------------------------------|--------------|
+| MAROS Enzo                   | 25%          |
+| PRUVOST LAMY Andrea          | 25%          |
+| RANDRETH Aaron               | 25%          |
+| ZHANG Anxian                 | 25%          |
+
+*L'ensemble des formules mathématiques dans ce document est rédigé en LaTeX.*
+*L'ensemble des formules mathématiques dans le code R est généré par un outil*
+*de conversion de LaTeX vers Unicode, quand possible.*
+
+*Certaines portions de code ont été retirées du fichier HTML généré, afin de*
+*mettre en avant le résultat (tableau, graphique) quand le procédé utilisé*
+*n'apporte que peu d'informations. Tous ces morceaux de code sont toutefois*
+*disponibles dans le fichier .Rmd, en clair, et sont documentés.*
+
+*Pour la bonne execution du fichier .Rmd :  `bodyfat.dat`, `car.csv`, `hapiness_csv.csv`, et `utils.R` doivent être présent dans le même répertoire.*
+
+## 2. Données simulées
+
+Pour comprendre la notion de régression linéaire, nous commençons par simuler un jeu de données simple, que nous étudierons ensuite. Les paramètres du modèle sont choisis aléatoirement au début, puis sont considérés comme inconnus pour la suite de l'analyse.
+
+Soient $(x_1, \dots, x_n)$ les valeurs réelles de la **variable explicative**, et $(Y_1, \dots, Y_n)$ un échantillon de la **variable à expliquer** $Y$, de réalisations $(y_i)_i$, avec $i \in \{1, \dots, n\}$.
+On pose le modèle de régression linéaire suivant :
+
+$$ \forall i \in \{1, \dots, n\},\ Y_i = a + b x_i + \varepsilon_i $$
+
+On considère que les erreurs $(\varepsilon_i)_i$ suivent une même loi normale centrée
+de variance $\sigma^2$, autrement dit :
+
+$$
+  (\varepsilon_1, \dots, \varepsilon_n)
+  \overset{\mathrm{iid}}{\sim}
+  \mathcal{N}(0, \sigma^2)
+$$
+
+Nos trois paramètres inconnus sont donc $a$, $b$ et $\sigma^2$.
+
+```{r, echo=FALSE}
+rm(list = ls())
+# Figer le caractère aléatoire (nombre choisi arbitrairement)
+set.seed(92)
+```
+
+```{r}
+a0 <- round(runif(1, 3, 15), 2)
+b0 <- round(runif(1, 1, 5), 2)
+s0 <- round(runif(1, 1, 3), 2)
+
+# Afficher les paramètres du modèle
+c("a" = a0, "b" = b0, "σ²" = s0)
+```
+```{r, echo=FALSE}
+# Rendre les valeurs constantes
+lockBinding("a0", globalenv())
+lockBinding("b0", globalenv())
+lockBinding("s0", globalenv())
+```
+
+### Question 1A
+On commence par simuler un jeu de données de taille $n$, en générant les
+valeurs de la variable explicative $x_i$.
+Pour s'assurer que les valeurs soient bien réparties et donc que la régression
+linéaire soit pertinente, on utilise une loi uniforme sur l'intervalle $[0, 5]$.
+
+```{r, echo=FALSE}
+min_n <- 200
+lockBinding("min_n", globalenv())
+```
+
+Le jeu de données devant être plus grand que `r min_n` éléments (*défini par
+`min_n` dans le code)*, nous posons $n = 300$.
+Par la suite, il pourra être nécessaire de générer d'autres jeux de données,
+de tailles différentes, pour étudier des propriétés de convergence des
+estimateurs par exemple.
+La fonction `gen_x` est créée pour faciliter et uniformiser cette tâche.
+
+```{r}
+#' Génère n réalisations de la variable explicative.
+#' @param n Nombre de réalisations à générer.
+#' @return Un vecteur de taille n contenant les réalisations.
+gen_x <- function(n) {
+  stopifnot(n >= min_n)
+  runif(n, 0, 5)
+}
+
+x <- gen_x(300)
+```
+
+### Question 1B
+On cherche maintenant à générer les valeurs de la variable à expliquer $Y_i$.
+On ne connait pas sa loi précise, mais on peut la déduire à partir de celle des
+erreurs $\varepsilon_i$ :
+
+$$
+\begin{align*}
+\varepsilon_i &\sim \mathcal{N}(0, \sigma^2) \\
+\iff \varepsilon_i + a + b x_i &\sim \mathcal{N}(a + b x_i, \sigma^2) \\
+\iff Y_i &\sim \mathcal{N}(a + b x_i, \sigma^2)
+\end{align*}
+$$
+
+Cette formule est vraie pour tout $i \in \{1, \dots, n\}$ car les
+$(\varepsilon_i)_i$ sont indépendantes et identiquement distribuées (iid), et
+que $(a + b x_i) \in \mathbb{R}$.
+
+Au même titre que pour la variable explicative, on crée une fonction `gen_y`
+pour faciliter et uniformiser la génération de la variable à expliquer.
+
+```{r}
+#' Génère les réalisations de la variable à expliquer.
+#' @param x_ Réalisations de la variable explicative.
+#' @return Un vecteur de même taille que x_ contenant les réalisations.
+gen_y <- function(x_) {
+  stopifnot(length(x_) >= min_n)
+  n <- length(x_)
+
+  # R utilise l'écart-type pour les lois normales
+  sd0 <- sqrt(s0)
+  rnorm(n, mean = a0 + b0 * x_, sd = sd0)
+}
+
+y <- gen_y(x)
+```
+
+Une autre manière de générer les valeurs de la variable à expliquer aurait été
+de générer les erreurs $(\varepsilon_i)_i$, puis d'appliquer la formule
+linéaire.
+La version actuellement utilisée est plus optimisée, en temps comme en mémoire,
+et est plus concise.
+
+Nos couples $(x_i, y_i)$ sont maintenant générés, en voici un échantillon :
+```{r echo=FALSE}
+head(data.frame("xᵢ" = x, "yᵢ" = y), 5)
+```
+
+### Question 2
+Pour visualiser les données, on trace un nuage de points, en ajoutant la droite
+de régression linéaire réelle.
+Le graphique nous montre que les données sont bien réparties autour de cette
+droite, équitablement au-dessus et au-dessous, ce qui est en cohérence avec le
+modèle défini plus haut, et avec la symétrie de la loi normale des erreurs.
+
+```{r echo=FALSE}
+m <- 20
+```
+
+Pour mieux visualiser les erreurs, on propose un second graphique sur un
+échantillon de `r m` points des données générées, où l'on trace les segments
+reliant les points à la droite de régression réelle.
+La taille des segments correspond à l'erreur.
+
+```{r echo=FALSE}
+par(mfrow = c(1, 2))
+
+# Afficher un nuage de points
+plot(x, y,
+  pch = 20,
+  xlim = c(0, 5),
+  ylim = c(min(y), max(y)),
+  xlab = "Variable explicative (xᵢ)",
+  ylab = "Variable à expliquer (yᵢ)",
+  main = "Données simulées et\n régression linéaire"
+)
+abline(a0, b0, col = "red", lwd = 2)
+
+echantillon_x <- head(x, m)
+echantillon_y <- head(y, m)
+plot(echantillon_x, echantillon_y,
+  pch = 20,
+  xlim = c(0, 5),
+  ylim = c(min(y), max(y)),
+  xlab = "Variable explicative (xᵢ)",
+  ylab = "Variable à expliquer (yᵢ)",
+  main = "Erreurs par rapport\n à la droite de régression"
+)
+abline(a0, b0, col = "red", lwd = 2)
+segments(echantillon_x, echantillon_y, echantillon_x, a0 + b0 * echantillon_x)
+```
+
+### Question 3
+On peut maintenant estimer les paramètres du modèle, en les considérant inconnus
+et en ne se basant que sur les données simulées. On utilise la méthode du maximum
+de vraisemblance pour estimer les paramètres, en les prenant sans biais.
+
+Pour éviter toute confusion, les vecteurs utilisés dans les fonctions sont
+nommés `x_` et `y_`. Chaque estimateur :
+
+- Vérifie la validité des vecteurs transmis,
+- Calcule les variables intermédiaires nécessaires,
+- Retourne l'estimation du paramètre demandé.
+
+```{r}
+#' Vérifie que les vecteurs x_ et y_ transmis aux estimateurs sont valides.
+#' @param x_ Vecteur de la variable explicative.
+#' @param y_ Vecteur de la variable à expliquer.
+#' @return Rien, mais génère une erreur si les vecteurs ne sont pas valides.
+assert_valid <- function(x_, y_) {
+  stopifnot(length(x_) == length(y_))
+  stopifnot(length(x_) > 2)
+}
+
+#' Estime le paramètre b du modèle de régression linéaire.
+#' @param x_ Vecteur de la variable explicative.
+#' @param y_ Vecteur de la variable à expliquer.
+#' @return Le paramètre b estimé.
+b_estim <- function(x_, y_) {
+  assert_valid(x_, y_)
+
+  n <- length(x_)
+  S_xY <- sum(x_ * y_) / n - mean(x_) * mean(y_)
+  s_x2 <- sum(x_^2) / n - mean(x_)^2
+
+  S_xY / s_x2
+}
+
+#' Estime le paramètre a du modèle de régression linéaire.
+#' @param x_ Vecteur de la variable explicative.
+#' @param y_ Vecteur de la variable à expliquer.
+#' @return Le paramètre a estimé.
+a_estim <- function(x_, y_) {
+  assert_valid(x_, y_)
+
+  b_hat <- b_estim(x_, y_)
+  y_bar <- mean(y_)
+  x_bar <- mean(x_)
+
+  y_bar - b_hat * x_bar
+}
+
+#' Estime le paramètre σ² des erreurs.
+#' @param x_ Vecteur de la variable explicative.
+#' @param y_ Vecteur de la variable à expliquer.
+#' @return Le paramètre σ² estimé.
+sigma_estim <- function(x_, y_) {
+  assert_valid(x_, y_)
+
+  n <- length(x_)
+  a_hat <- a_estim(x_, y_)
+  b_hat <- b_estim(x_, y_)
+
+  sum((y_ - a_hat - b_hat * x_)^2) / (n - 2)
+}
+```
+
+### Question 4
+Maintenant que nos fonctions sont définies, nous pouvons les utiliser avec
+les données existantes pour en calculer les estimations de $a$, $b$ et $\sigma^2$
+que l'on nommera respectivement $\hat{a}$, $\hat{b}$ et $\hat{\sigma}^2$.
+```{r}
+a_hat <- a_estim(x, y)
+b_hat <- b_estim(x, y)
+s_hat <- sigma_estim(x, y)
+
+# Afficher les paramètres estimés
+c("^a" = a_hat, "^b" = b_hat, "^σ²" = s_hat)
+```
+
+### Question 5
+Les estimations calculées semblent relativement proches des paramètres générés
+en Question 1. Pour vérifier visuellement cette hypothèse, nous reprenons le
+premier graphique de la Question 2, en y ajoutant la droite de régression
+linéaire calculée par les estimateurs (en bleu).
+
+```{r, echo=FALSE}
+plot(x, y,
+  pch = 20,
+  xlab = "Variable explicative (xᵢ)",
+  ylab = "Variable à expliquer (yᵢ)",
+  main = "Droites de régression linéaires réelle et estimée"
+)
+
+abline(a = a0, b = b0, col = "red", lwd = 2)
+abline(a_hat, b_hat, col = "blue", lwd = 2)
+legend("topleft",
+  lwd = "2",
+  legend = c("Réelle", "Estimée"),
+  col = c("red", "blue")
+)
+```
+
+### Question 6
+On calcule maintenant les résidus, représentés par la différence entre les
+valeurs de $Y_i$ et les valeurs estimées par le modèle de régression linéaire.
+
+```{r}
+y_hat <- a_hat + b_hat * x
+e_hat <- y - y_hat
+```
+
+Un échantillon des 5 premiers résidus calculés ressemble à ceci :
+```{r, echo=FALSE}
+# Afficher les premiers résidus
+head(data.frame("yᵢ" = y, "ŷᵢ" = y_hat, "êᵢ" = e_hat), 5)
+```
+
+Pour vérifier la validité des résidus, on peut calculer la moyenne empirique et
+la variance empirique corrigée, deux estimateurs de la moyenne et de la variance
+des résidus. En effet, d'après l'énoncé du modèle, on a :
+
+$$
+  (\varepsilon_1, \dots, \varepsilon_n)
+  \overset{\mathrm{iid}}{\sim}
+  \mathcal{N}(0, \sigma ^2)
+$$
+
+On note les deux estimateurs $\hat{\mu}$ et $\hat{\sigma}^2$ respectivement la
+moyenne et la variance des résidus.
+
+```{r}
+c(
+  "^μ" = round(mean(e_hat), 5),
+  "^σ²" = round(var(e_hat), 5)
+)
+```
+
+On remarque ici que la moyenne des résidus est proche de $0$, et que la variance
+est proche du paramètre `s0` utilisé pour générer les données ($`r s0`$).
+
+### Question 7
+
+Un autre moyen de vérifier la cohérence de nos résultats est de s'assurer que
+le point de coordonnées $(\bar{x}, \bar{y})$ est sur la droite de régression
+estimée.
+
+```{r}
+x_bar <- mean(x)
+y_bar <- mean(y)
+
+y_droite <- a_hat + b_hat * x_bar
+
+# Afficher
+c(
+  "x̄" = x_bar,
+  "ȳ" = y_bar,
+  "ŷ" = y_droite
+)
+```
+
+Visuellement, ce point peut être représenté en rouge sur le graphique suivant,
+ne comprenant que la droite de régression estimée.
+
+Afin de mieux visualiser cette appartenance, il est possible de reprendre le
+graphique généré à la question 2, avec cette fois-ci la droite de régression
+linéaire estimée, ainsi qu'un nouveau point en rouge représentant
+$(\bar{x}, \bar{y})$.
+
+```{r, echo=FALSE}
+plot(x, y,
+  pch = 20,
+  xlab = "Variable explicative (xᵢ)",
+  ylab = "Variable à expliquer (Yᵢ)",
+  main = "Appartenance du point (¯x, ¯y) à la\ndroite de régression linéaire",
+  col = "grey"
+)
+
+abline(a_hat, b_hat, col = "black", lwd = 2)
+points(x_bar, y_bar, col = "red", pch = 20)
+legend("topleft",
+  legend = c("Courbe des moindres carre", "Centre de gravite", "Jeu de données"),
+  # les couleurs doivent coincider avec celles tracées plus haut
+  col = c("black", "red", "grey"),
+  # resp. légende avec des points et ligne
+  pch = c(NA, 20, 20),
+  lty = c(1, NA, NA),
+  lwd = c(2, NA, NA)
+)
+```
+
+
+### Question 8
+
+En utilisant la pleine puissance de R, on peut vérifier toutes les données
+précédemment calculées en une seule ligne :
+
+```{r}
+reg <- lm(y ~ x)
+summary(reg)
+```
+
+De cette commande on peut extraire les paramètres estimés
+$\hat{a} = `r reg$coefficients["(Intercept)"]`$ et
+$\hat{b} = `r reg$coefficients["x"]`$.
+
+On peut également vérifier la cohérence des résidus, en regardant leur moyenne
+et leur variance. La fonction calcule pour nous l'ensemble des résidus,
+accessibles via `reg$residuals`.
+
+```{r}
+c(
+  "^μ" = round(mean(reg$residuals), 5),
+  "^σ²" = round(var(reg$residuals), 5)
+)
+```
+
+Une dernière approche de vérification serait de comparer les quartiles et
+extrema calculés par la fonction `lm` avec ceux de nos résidus :
+```{r}
+# Matrice de comparaison
+m_comp <- matrix(nrow = 2, ncol = 5)
+
+# Données
+m_comp[1, ] <- c(
+  min(e_hat),
+  quantile(e_hat, 0.25),
+  median(e_hat),
+  quantile(e_hat, 0.75),
+  max(e_hat)
+)
+m_comp[2, ] <- c(
+  min(reg$residuals),
+  quantile(reg$residuals, 0.25),
+  median(reg$residuals),
+  quantile(reg$residuals, 0.75),
+  max(reg$residuals)
+)
+
+# Noms des lignes et colonnes
+colnames(m_comp) <- c("Min", "Q1", "Median", "Q3", "Max")
+rownames(m_comp) <- c("e_hat", "reg$residuals")
+
+m_comp
+```
+
+Nous en concluons ainsi que nos précédentes estimations sont correctement
+calculées, et procédons à la suite du projet.
+
+
+### Question 9
+
+#### Courbe des moyennes des erreurs
+
+Nous cherchons à étudier le comportement asymptotique des estimateurs de $a$ et du $b$. Une première approche est de calculer la moyenne d'un échantillon de 100 estimations, chaque estimation sur des jeux de données différents, et pour différentes tailles de jeux de données.
+
+Pour rapporter les deux convergences des estimateurs sur un même graphique, on calcule plutôt la moyenne des erreurs des estimations, étant donné que l'on connaît les valeurs réelles de $a$ et de $b$. Si nos estimateurs sont bons, l'erreur devrait tendre vers $0$ pour $n$ grand.
+
+On commence par générer les fonctions qui vont nous servir pour la génération des données :
+
+```{r eval=TRUE}
+#' Calcule la différence entre une estimation et sa valeur réelle.
+#' @param size Taille des échantillons à générer.
+#' @param estimator Fonction calculant l'estimation à partir des données.
+#' @param real Valeur réelle de la variable estimée.
+#' @return La différence entre l'estimation et la valeur réelle.
+diff_estim <- function(size, estimator, real) {
+  x_ <- gen_x(size)
+  y_ <- gen_y(x_)
+  estimation <- estimator(x_, y_)
+
+  abs(estimation - real)
+}
+
+#' Calcule la moyenne de plusieurs différences d'estimations entre a et a0.
+#' @param size Taille des échantillons à générer.
+#' @return La moyenne des différences.
+moyenne_diff_a <- function(size) {
+  mean(replicate(100, diff_estim(size, a_estim, a0)))
+}
+
+#' Calcule la moyenne de plusieurs différences d'estimations entre b et b0.
+#' @param size Taille des échantillons à générer.
+#' @return La moyenne des différences.
+moyenne_diff_b <- function(size) {
+  mean(replicate(100, diff_estim(size, b_estim, b0)))
+}
+
+sizes <- seq(min_n, 30 * min_n, by = 50)
+erreurs_a_hat <- sapply(sizes, moyenne_diff_a)
+erreurs_b_hat <- sapply(sizes, moyenne_diff_b)
+```
+
+Pour l'affichage des estimations, on se porte sur un intervalle
+$[`r min_n`, 30 \times `r min_n`] = [`r min_n`, `r 30 * min_n`]$. 
+
+```{r, eval=TRUE}
+plot(
+  sizes,
+  erreurs_a_hat,
+  type = "l",
+  col = "red",
+  xlim = c(min(sizes), max(sizes)),
+  ylim = c(0, max(erreurs_a_hat)),
+  xlab = "Taille de l'échantillon",
+  ylab = "Erreur moyenne de l'estimation",
+  main = "Étude de la convergence en probabilité des estimateurs de a et b"
+)
+lines(
+  sizes,
+  erreurs_b_hat,
+  col = "blue"
+)
+
+legend("topright",
+  legend = c("Estimateur de a", "Estimateur de b"),
+  col = c("red", "blue"),
+  lwd = 1
+)
+```
+
+Les deux estimateurs semblent tous deux se rapprocher d'une valeur suffisamment
+proche de $0$, on peut donc en déduire la convergence de l'erreur des estimations
+vers $0$, ce qui signifie que les estimations convergent vers la valeur réelle
+avec du paramètre pour $n$ grand.
+
+#### Diagrammmes en boîte
+
+Une autre approche pour calculer la convergence est de tracer des diagrammes en boîte pour plusieurs jeux de données de différentes tailles. En lieu et place de la moyenne, l'indicateur central est la médiane, et les graphiques sont plus complets, en particulier avec l'écart inter-quartile qui donne une idée de la dispersion des estimations.
+
+Comme précédemment, on commence par générer les fonctions qui vont générer les données et tracer le graphique :
+
+```{r}
+#' Trace un diagramme en boîte pour un estimateur donné.
+#' @param estimator Fonction calculant l'estimation à partir des données.
+#' @param name Le nom de l'estimateur, utilisé dans la légende du diagramme.
+#' @param sizes Les tailles de jeux de données.
+#' @param real Valeur réelle du paramètre estimé.
+trace_boxplots_estimateur <- function(estimator, name, sizes, real) {
+  n <- 100
+
+  # Matrice contenant les résultats des simulations (une simulation par colonne)
+  results <- matrix(ncol = length(sizes), nrow = max(sizes))
+  colnames(results) <- sizes
+
+  # Simulation pour chaque taille d'échantillon
+  for (i in seq_along(sizes)) {
+    results[, i] <- replicate(n, {
+      x_ <- gen_x(sizes[i])
+      y_ <- gen_y(x_)
+      estimator(x_, y_)
+    })
+  }
+
+  boxplot(results,
+    ylab = name,
+    xlab = "Taille d'échantillon de x et y",
+    main = paste("Convergence de", name, "\npour", n, "estimations")
+  )
+
+  # Affichage d'une ligne de référence
+  abline(
+    h = real,
+    col = "red",
+    lty = 2,
+    lwd = 2
+  )
+
+  legend("topright",
+    legend = "Valeur réelle",
+    col = "red",
+    lty = 2,
+    lwd = 2
+  )
+}
+```
+
+On génère côte à côte les diagrammes en boîtes des deux estimateurs, en
+définissant à l'avance les tailles de jeux de données :
+
+```{r}
+par(mfrow = c(1, 2))
+sizes <- c(200, 500, 1000, 9000)
+trace_boxplots_estimateur(a_estim, "^a", sizes, a0)
+trace_boxplots_estimateur(b_estim, "^b", sizes, b0)
+```
+
+Pour chaque estimateur, non seulement la médiane se rapproche de la valeur réelle du paramètre, mais l'écart-interquartile diminue drastiquement pour $n$ grand, preuve de la convergence des estimateurs.
+
+
+### Question 10
+
+Notre prochaine étape de l'étude des estimateurs consiste à calculer un intervalle de confiance pour chacun d'eux. La loi de chaque estimateur est connue, mais nous nous concentrerons ici uniquement sur celle de $\hat a$ :
+
+$$
+\hat{a} \sim \mathcal{N}
+\left(
+a,
+\frac{\sigma^2}{n}
+\left(1 + \frac{\bar x}{s_x^2} \right)
+\right),
+\ \text{avec }
+s_x^2 = \frac{1}{n} \sum_{i=1}^n (x_i - \bar{x})^2
+$$
+
+En centrant-réduisant $\hat a$, et en remplaçant $\sigma^2$ par son estimateur $\hat \sigma^2$, on obtient l'expression suivante, dont on cherche à connaître la loi pour s'assurer qu'il s'agisse bien d'un pivot, afin de l'utiliser dans notre intervalle de confiance :
+
+$$
+\frac{\hat a - a}{\sqrt{\frac{\hat \sigma ^2}{n} \left(1 + \frac{\bar x ^2}{s^2_x}\right)}}
+$$
+
+Par une suite de calcul, il est possible d'affirmer que cette expression suit une loi de Student à $n-2$ degrés de liberté. Pour le confirmer, nous allons étudier empiriquement son comportement.
+
+Nous commençons par définir une fonction `pivot_a`, qui modélise l'expression à étudier :
+
+```{r}
+#' Génère des réalisations du pivot de a sur différents jeux de données.
+#' @param n Taille des jeux de données
+#' @return Un vecteur contenant l'estimation de a et son pivot
+pivot_a <- function(n) {
+  # Génération des jeux de données
+  x_ <- gen_x(n)
+  y_ <- gen_y(x_)
+
+  # Calcul des valeurs intermédiaires
+  a_hat <- a_estim(x_, y_)
+  sigma_hat <- sigma_estim(x_, y_)
+  x_bar <- mean(x_)
+
+  # Résultat
+  res <- (a_hat - a0) / sqrt(((sigma_hat^2 / n) * ((1 + x_bar^2) / var(x_))))
+
+  c(
+    estimation = a_hat,
+    pivot = res
+  )
+}
+```
+
+```{r, echo=FALSE}
+n_q10 <- 1000
+```
+
+Nous simulons ensuite $150$ réalisations de l'expression pour des jeux de données de taille $`r n_q10`$ :
+```{r}
+# 10.1
+xsn2 <- data.frame(t(replicate(150, pivot_a(n_q10))))
+```
+
+En plus de nous renvoyer la réalisation de l'expression du pivot, la fonction `pivot_a` nous transmet l'estimation de $a$ qu'elle a utilisé pour produire le calcul. Il nous est ainsi possible d'observer par exemple les 5 premières estimations :
+
+```{r, echo=FALSE}
+#10.2
+head(xsn2$estimation, 5)
+```
+
+Nous affichons l'histogramme des pivots de a, nous permettant de voir la forme de la fonction de densité de la loi suivie par ce pivot. En y superposant la courbe de la fonction de densité de student à $n-2$ degrés de liberté (ici $`r n_q10 - 2`$), on remarque bien que l'expression suit cette loi.
+
+```{r, echo=FALSE}
+# 10.3
+hist(xsn2$pivot,
+  freq = FALSE,
+  xlab = "Pivot",
+  ylab = "Densité",
+  main = "Fonction de densité empirique\ndu pivot de a"
+)
+curve(dt(x, df = n_q10 - 2), add = TRUE, col = "red")
+
+legend("topright",
+  legend = "Student(n-2)",
+  col = "red",
+  lwd = 1
+)
+```
+
+### Question 11
+
+Nos trois pivots seront donc les suivants, pour chaque estimateur :
+
+$$
+\frac{\hat a - a}{\sqrt{\frac{\hat \sigma ^2}{n} \left(1 + \frac{\bar x ^2}{s^2_x}\right)}} \sim \mathcal{T}_{n-2} \qquad
+\frac{\hat b - b}{\sqrt{\frac{\hat \sigma ^ 2}{ns_x^2}}} \sim \mathcal{T}_{n-2} \qquad
+(n-2)\frac{\hat \sigma ^2}{\sigma^2} \sim \chi_{n-2}^2
+$$
+
+Pour chaque pivot, nous générons un intervalle de confiance au travers des
+fonctions R `gen_IC_a`, `gen_IC_b` et `gen_IC_s`. Au même titre que pour les
+estimateurs, ici chaque fonction :
+
+- Vérifie la validité des vecteurs transmis,
+- Calcule les variables intermédiaires nécessaires,
+- Retourne l'intervalle de confiance.
+
+```{r}
+#' Vérifie que les vecteurs x_ et y_ transmis aux IC sont valides.
+#' @param x_ Vecteur de la variable explicative.
+#' @param y_ Vecteur de la variable à expliquer.
+#' @param confiance Degré de confiance
+#' @return Rien, mais génère une erreur si les vecteurs ne sont pas valides.
+assert_ic_valid <- function(x_, y_, confiance) {
+  stopifnot(length(x_) == length(y_))
+  stopifnot(length(x_) > 2)
+  stopifnot(confiance > 0 && confiance < 1)
+}
+
+#' Retourne un vecteur de taille 2 avec x et -x.
+#' @param x un scalaire.
+#' @return [-x, x].
+pm <- function(x) {
+  x * c(-1, 1)
+}
+
+#' Génère une réalisation d'un intervalle de confiance bilatéral de â.
+#' @param x  Vecteur de la variable explicative.
+#' @param y_ Vecteur de la variable à expliquer.
+#' @param confiance Le niveau de confiance.
+#' @return Un vecteur de taille 2 contenant la borne inférieure et supérieure
+#' l'intervalle.
+gen_IC_a <- function(x_, y_, confiance = 0.95) {
+  assert_ic_valid(x_, y_, confiance)
+
+  n <- length(x_)
+  alpha <- 1 - confiance
+  x_bar <- mean(x_)
+  s_x2 <- (1 / n) * sum((x_ - x_bar)^2)
+
+  t_ <- qt(1 - (alpha / 2), df = (n - 2))
+  a_hat <- a_estim(x_, y_)
+  s_hat <- sigma_estim(x_, y_)
+
+  a_hat + pm(t_ * sqrt((s_hat / n) * (1 + (x_bar^2 / s_x2))))
+}
+
+#' Génère une réalisation d'un intervalle de confiance bilatéral de b^.
+#' @param x  Vecteur de la variable explicative.
+#' @param y_ Vecteur de la variable à expliquer.
+#' @param confiance Le niveau de confiance.
+#' @return Un vecteur de taille 2 contenant la borne inférieure et supérieure
+#' l'intervalle.
+gen_IC_b <- function(x_, y_, confiance = 0.95) {
+  assert_ic_valid(x_, y_, confiance)
+
+  n <- length(x_)
+  alpha <- 1 - confiance
+  x_bar <- mean(x_)
+  s_x2 <- (1 / n) * sum((x_ - x_bar)^2)
+
+  t_ <- qt(1 - alpha / 2, df = n - 2)
+  b_hat <- b_estim(x_, y_)
+  s_hat <- sigma_estim(x_, y_)
+
+  b_hat + pm(t_ * sqrt(s_hat / (n * s_x2)))
+}
+
+#' Génère une réalisation d'un intervalle de confiance bilatéral de c^.
+#' @param x  Vecteur de la variable explicative.
+#' @param y_ Vecteur de la variable à expliquer.
+#' @param confiance  Le niveau de confiance.
+#' @return Un vecteur de taille 2 contenant la borne inférieure et supérieure
+#' l'intervalle.
+gen_IC_s <- function(x_, y_, confiance = 0.95) {
+  assert_ic_valid(x_, y_, confiance)
+
+  n <- length(x_)
+  alpha <- 1 - confiance
+  s_hat <- sigma_estim(x_, y_)
+  chi2_ <- qchisq(c(1 - alpha / 2, alpha / 2), df = n - 2)
+
+  (n - 2) * s_hat / chi2_
+}
+```
+
+### Question 12
+
+Nos fonctions maintenant implémentées, il est temps de calculer un ensemble
+d'intervalles de confiance pour chaque estimateur avant de les étudier à la
+prochaine question.
+
+```{r, echo=FALSE}
+n_q12 <- 1000
+```
+
+On commence par poser la taille des jeux de données sur lesquels sont calculés
+les intervalles de confiance à $`r n_q12`$. Pour chaque estimateur, on génère
+par ailleurs $100$ intervalles.
+
+```{r}
+ic_a_100 <- replicate(100, {
+  x_ <- gen_x(n_q12)
+  y_ <- gen_y(x_)
+
+  gen_IC_a(x_, y_)
+})
+
+ic_b_100 <- replicate(100, {
+  x_ <- gen_x(n_q12)
+  y_ <- gen_y(x_)
+
+  gen_IC_b(x_, y_)
+})
+
+ic_s_100 <- replicate(100, {
+  x_ <- gen_x(n_q12)
+  y_ <- gen_y(x_)
+
+  gen_IC_s(x_, y_)
+})
+```
+
+Voici les quelques premiers intervalles ainsi générés pour chaque estimateur :
+
+```{r echo=FALSE}
+ic_frame <- data.frame(
+  alpha = t(ic_a_100),
+  beta = t(ic_b_100),
+  sigma = t(ic_s_100)
+)
+
+colnames(ic_frame) <- c("[𝛼₁", "𝛼₂]", "[𝛽₁", "𝛽₂]", "[𝜎₁", "𝜎₂]")
+head(ic_frame, 5)
+```
+
+### Question 13
+Par simple lecture des intervalles, il n'est pas possible de vérifier qu'elles
+respectent le degré de confiance imposé lors de leur génération. Pour visualiser
+nos intervalles de confiance, le graphique suivant peut être utilisé :
+
+```{r, echo=FALSE}
+#' Dessine les intervalles de confiance
+#'
+#' @param ICs Matrice des intervalles de confiance
+#' @param mu Paramètre réel estimé par les ICs
+#' @param plot Dessine les ICs ou pas
+plot_ICs <- function(ICs, mu, plot = TRUE, xlim, main) {
+  nic <- ncol(ICs)
+  hit <- ICs[1, ] < mu & ICs[2, ] > mu
+
+  if (plot) {
+    plot.new()
+    if (missing(xlim)) xlim <- mu + c(-1, 1) * max(abs(ICs - mu))
+    plot.window(xlim = xlim, ylim = c(0, nic - 1))
+    axis(side = 1)
+    segments(ICs[1, ], 1:nic, ICs[2, ], 1:nic, lwd = 2, col = 2 + hit)
+    lines(c(mu, mu), c(0, nic), type = "l", lty = 2)
+    if (!missing(main)) title(main = main)
+  }
+  # On renvoie le nombre d'intervalles couvrants sans en faire echo
+  invisible(list(hit = sum(hit), miss = nic - sum(hit)))
+}
+
+par(mfrow = c(1, 3))
+
+plot_ICs(ic_a_100, a0, main = "Intervalles de confiance de a")
+plot_ICs(ic_b_100, b0, main = "Intervalles de confiance de b")
+plot_ICs(ic_s_100, s0, main = "Intervalles de confiance de 𝜎")
+```
+
+Sur ce graphique, l'entièreté des intervalles de confiance apparait coloré, en
+vert si le paramètre estimé est bien dans l'intervalle de confiance, et en rouge
+sinon. La ligne en pointillé nous guide pour visualiser où se trouve le
+paramètre.
+
+Visuellement, on observe bien que ~5% des intervalles n'incluent pas les valeurs
+réelles de la variable qu'elles doivent encadrer, et cela pour $a$, $b$, et
+$\sigma^2$.
+
+Nous avons aussi mis en place une fonction (inspirée du TP4) qui permet de
+calculer le taux de recouvrement des différents intervalles. Cette méthode
+apporte une approche numérique pour vérifier à nouveau le degré de confiance :
+
+```{r}
+tauxRecouvrement <- function(estimateur, ICs) {
+  couverts <- estimateur >= ICs[1, ] & estimateur <= ICs[2, ]
+  mean(couverts)
+}
+```
+
+```{r echo=FALSE}
+c(
+  "Recouvrement a" = tauxRecouvrement(a0, ic_a_100),
+  "Recoubrement b" = tauxRecouvrement(b0, ic_b_100),
+  "Recouvrement 𝜎" = tauxRecouvrement(s0, ic_s_100)
+)
+```
+
+## 3. Homoscédasticité, indépendance et normalité des résidus
+
+Dans cette partie, nous nous intéressons aux hypothèses $H$ énoncées pour les résidus corrigés. Pour rappel, la formule est la suivante :
+
+$$
+\tilde{\varepsilon}_i = \frac{\hat{\varepsilon}_i}{\sqrt{1 - h_i}}, \quad \text{avec } h_i = \frac{1}{n} + \frac{(x_i - \bar{x})^2}{\sum_{j=1}^{n}(x_j - \bar{x})^2}, \quad i = 1, \ldots, n.
+$$
+
+Nous testerons les formules et les hypothèses sur le quartet d'Anscombe (intégré à R par défaut). Ces quatres jeux de données sont particulièrement intéressants, puisqu'ils partagent tous des propriétés statistiques relativement identique (moyennes, variances...), mais ont des distribution de données différents.
+
+### Question 14
+
+Pour comprendre dans un premier temps la distribution du quartet, il est
+nécessaire de les représenter graphiquement. 
+
+Pour chaque graphique, nous affichons le nuage de point, suivi de la droite
+de régression linéaire calculée par R. Les régressions seront étudiées plus en
+détails dans la question suivante.
+
+```{r, echo=FALSE, fig.height=8, fig.cap="Représentation du Quartet d'Anscombe"}
+xmax <- max(anscombe$x1, anscombe$x2, anscombe$x3, anscombe$x4)
+ymax <- max(anscombe$y1, anscombe$y2, anscombe$y3, anscombe$y4)
+
+#' Affiche un jeu de données d'Anscombe
+#' @param x_dataset Le jeu de données des x
+#' @param y_dataset Le jeu de données des y
+#' @param i Le numéro du jeu de données
+plot_anscombe <- function(x_dataset, y_dataset, i) {
+  stopifnot(0 < i, i <= 4)
+
+  plot(
+    x_dataset,
+    y_dataset,
+    xlim = c(0, xmax),
+    ylim = c(0, ymax),
+    xlab = "x",
+    ylab = "y",
+    main = paste("Anscombe #", i, sep = "")
+  )
+
+  abline(lm(y_dataset ~ x_dataset))
+}
+
+par(mfrow = c(2, 2))
+plot_anscombe(anscombe$x1, anscombe$y1, 1)
+plot_anscombe(anscombe$x2, anscombe$y2, 2)
+plot_anscombe(anscombe$x3, anscombe$y3, 3)
+plot_anscombe(anscombe$x4, anscombe$y4, 4)
+```
+
+### Question 15
+
+La fonction standard `lm` nous permet d'effectuer les régressions linéaires sur
+les 4 jeux de données :
+
+```{r}
+reg1 <- lm(anscombe$y1 ~ anscombe$x1)
+reg2 <- lm(anscombe$y2 ~ anscombe$x2)
+reg3 <- lm(anscombe$y3 ~ anscombe$x3)
+reg4 <- lm(anscombe$y4 ~ anscombe$x4)
+```
+
+<!-- Nous pouvons ensuite obtenir un résumé numérique grâce à la fonction `summary`. -->
+
+Pour éviter de faire une succession de `summary` complets difficilement
+lisibles, nous avons extrait dans un même tableau quelques données intéressantes
+à mettre en avant :
+
+```{r, echo=FALSE}
+sreg1 <- summary(reg1)
+sreg2 <- summary(reg2)
+sreg3 <- summary(reg3)
+sreg4 <- summary(reg4)
+
+data.frame(
+  reg1 = c(reg1$coefficients, sreg1$adj.r.squared, sreg1$r.squared),
+  reg2 = c(reg2$coefficients, sreg2$adj.r.squared, sreg2$r.squared),
+  reg3 = c(reg3$coefficients, sreg3$adj.r.squared, sreg3$r.squared),
+  reg4 = c(reg4$coefficients, sreg4$adj.r.squared, sreg4$r.squared),
+  row.names = c("(Intercept)", "x", "Multiple R-Squared", "Adjusted R-Squared")
+)
+```
+
+Nous remarquons que les quatre régressions ont des paramètres de régression dont
+les valeurs sont proches. Il en va de même pour les coefficients de
+corrélation, qui avoisinent les 0.66 en corrigé comme en non-corrigé.
+
+Nous pouvons donc en déduire que, bien que les statistiques soient similaires,
+il ne faut pas en tirer une conclusion hâtive, car cela ne signifie pas
+nécessairement que les données $(x_i, y_i)$ sont identiques. Cela peut
+notamment être illustré par la question précédente, où les couples de données
+diffèrent des autres.
+
+
+### Question 16
+Pour analyser les résidus et discuter de la validité des hypothèses $H$ des
+couples de variable des jeux de données d'Anscombe, nous nous baserons sur une
+étude visuelle des graphiques suivants :
+
+- Un diagramme quantile-quantile des résidus corrigés, qui nous permettra de
+  vérifier l'hypothèse de normalité;
+- Un histogramme des résidus corrigés, venant appuyer le diagramme précédent sur
+  la même hypothèse;
+- Un nuage de points entre les résidus standardisés et de la variable
+  explicative, pour vérifier l'hypothèse d'homoscédasticité (pour rappel, cette
+  hypothèse indique l'uniforme variance des résidus corrigés).
+
+```{r, echo=TRUE}
+#' Calcule les résidus standardisés pour un modèle de régression linéaire
+#' simple.
+#'
+#' @param x_ vecteur des variables explicatives (x)
+#' @param reg_ modèle de régression (objet retourné par lm)
+#' @return vecteur des résidus standardisés
+#'
+#' Les résultats de cette fonction sont vérifiables avec rstandard.
+calcule_residus_corriges <- function(x_, reg_) {
+  n_ <- length(x_)
+  x_bar_ <- mean(x_)
+  Sxx_ <- sum((x_ - x_bar_)^2)
+
+  residuals_ <- reg_$residuals
+
+  hi_ <- (1 / n_) + ((x_ - x_bar_)^2) / Sxx_
+  sigma_hat <- sqrt(sum(residuals_^2) / (n_ - 2))
+
+  residuals_ / (sigma_hat * sqrt(1 - hi_))
+}
+
+#' Génère les graphiques des résidus standardisés d’un modèle linéaire
+#'
+#' @param x_ vecteur des variables explicatives (x)
+#' @param y_ vecteur des variables à expliquer (y)
+#' @return Aucun objet retourné. Affiche des graphiques.
+fq16 <- function(x_, y_) {
+  reg_ <- lm(y_ ~ x_)
+
+  residus_corrige_ <- calcule_residus_corriges(x_, reg_)
+  # Retirer les valeurs infinies
+  # (R gère mal les valeurs trop grandes ou trop petites)
+  residus_corrige_[!is.finite(residus_corrige_)] <- NA
+
+  par(mfrow = c(1, 3))
+  qqnorm(residus_corrige_, main = "QQ-plot des residus standardises")
+  qqline(residus_corrige_, col = "red")
+
+  hist(residus_corrige_,
+    freq = FALSE,
+    main = "Histogramme des residus \ncorriges",
+    xlab = "Residus standardises"
+  )
+  curve(
+    dnorm(x,
+      mean = mean(residus_corrige_, na.rm = TRUE),
+      sd = sd(residus_corrige_, na.rm = TRUE)
+    ),
+    add = TRUE,
+    col = "red"
+  )
+
+  plot(x_, residus_corrige_, main = "Residus corrige en fonction de x")
+}
+```
+
+```{r, echo=FALSE, fig.cap="Analyse du jeu de donnée Anscombe #1", fig.height=3.5}
+fq16(anscombe$x1, anscombe$y1)
+```
+
+```{r, echo=FALSE, fig.cap="Analyse du jeu de donnée Anscombe #2", fig.height=3.5}
+fq16(anscombe$x2, anscombe$y2)
+```
+
+```{r, echo=FALSE, fig.cap="Analyse du jeu de donnée Anscombe #3", fig.height=3.5}
+fq16(anscombe$x3, anscombe$y3)
+```
+
+```{r, echo=FALSE, fig.cap="Analyse du jeu de donnée Anscombe #4", fig.height=3.5}
+fq16(anscombe$x4, anscombe$y4)
+```
+
+**Analyse des couples** :
+
+- $(x_1, y_1)$: 
+    - **QQ-plot** : la distribution des résidus suit à peu près la droite de la
+      loi normale centrée. Une distribution normale des résidus est donc
+      plausible.
+    - **Histogramme** : on remarque une certaine ressemblance avec une loi
+      normale centrée, ce qui vient appuyer le diagramme quantile-quantile.
+    - **Nuage de point** : on observe que les points sont répartis autour de 0,
+      sans forme particulière, ce qui confirme l’hypothèse d’homoscédasticité.
+- $(x_2, y_2)$: 
+    - **QQ-plot** : ce graphique présente des propriétés similaires à celles du
+      couple précédent. Toutefois, on peut distinguer une valeur notablement
+      éloignée de la droite, ce qui suggère la présence d’un point mal expliqué
+      par le modèle.
+    - **Histogramme** : le graphique ne suit pas la fonction densité de la
+      gaussienne, il est donc difficile d’affirmer que les résidus suivent une
+      loi normale centrée et réduite.
+    - **Nuage de point** : on remarque une forme courbée ressemblant à un polynôme de degré deux. Ce qui indique que la relation entre le couple de variable $(x_2, y_2)$, n'est pas linéaire et que le modèle ne suit pas le modèle de régression linéraire simple.
+- $(x_3, y_3)$:
+    - **QQ-plot** : la majorité des points sont très proches des quantiles de la
+      loi normale centrée réduite, à l’exception d’un point aberrant. En effet,
+      la valeur de ce point est beaucoup trop éloignée de la droite de
+      régression. On exclut donc l’hypothèse que les résidus suivent une loi
+      normale centrée réduite.
+    - **Histogramme** : le graphique suit en quelque sorte la courbe de la loi
+      normale centrée, mais nous ne le prendrons pas en compte étant donné que
+      le QQ-plot n’est pas conforme.
+    - **Nuage de points** : les points se suivent linéairement, mais la
+      répartition des résidus n’est pas homogène autour de 0 en $x$. L’hypothèse
+      d’homoscédasticité n’est donc pas respectée.
+- $(x_4, y_4)$:
+    - **QQ-plot** : Le diagramme quantile-quantile est parfait, tous les points
+      suivent l'allure de la droite normale centrée réduite.
+    - **Histogramme** : cependant, la répartition des valeurs sur l’histogramme
+      est un peu douteuse, car il y a une concentration importante des valeurs
+      des résidus sur la borne gauche. Nous pouvons donc rejeter l’hypothèse que
+      les résidus suivent une loi normale centrée réduite.
+    - **Nuage de points** : la grande majorité des valeurs sont concentrées à la
+      valeur huit en abscisse. La répartition des résidus reste similaire
+      lorsque les valeurs des $x_i$ augmentent. L’hypothèse d’homoscédasticité
+      n’est donc pas valide.
+    
+Le seul couple qui est le plus apte à suivre une modélisation de régression
+linéaire simple est $(x_1, y_1)$. Cette conclusion était instinctivement
+prédictible à la vue des graphiques de la section précédente.
+
+
+## 4. Jeu de données réelles Real_Data
+### 4.1 Quelques éléments de statistique descriptive
+
+#### Question 17
+
+#### Import des données
+
+```{r, echo=FALSE}
+car_data <- read.csv2("car.csv", sep="\t")
+bodyfat_data <- read.table("bodyfat.dat", header=T)
+happiness_data <- read.csv("happiness_csv.csv")
+```
+
+#### Analyse du fichier `car.csv`
+
+Test de corrélation entre les données discrètes, concernant les voitures, afin de déterminer leur utilisabilité. Les deux bloques de code ci-dessous permetent de transformer les données non numériques en données numériques, afin qu’elles puissent être traitées.
+
+```{r, echo=FALSE}
+# sous modele et sous-model
+car_data$Sous.modèle <- as.integer(factor(car_data$Sous.modèle))
+car_data$Modèle <- as.integer(factor(car_data$Modèle))
+cor(car_data$Modèle, car_data$Sous.modèle)
+```
+Nous remarquons que la corrélation entre les données Model et Sous-model est assez faible. Cette première indication permet d’en déduire que ce couple n’est pas pertinent, et nous l'écartons donc de nos choix.
+
+
+```{r, echo=FALSE}
+# litre et cylindrique
+cor(car_data$Litre, car_data$Cylindrée)
+reg <- lm(car_data$Cylindrée~ car_data$Litre)
+plot(car_data$Litre, car_data$Cylindrée)
+abline(reg)
+```
+Pour les données litre et cylindrique, nous constatons une très forte corrélation entre les deux variables. Cependant, lorsque nous traçons le nuage de points, nous remarquons des alignements sur certaines valeurs fixes de l’axe des ordonnées. Plus précisément, trois regroupements apparaissent autour de trois constantes $k_i \mid 1 \leq i \leq 3$.
+De plus, le nuage de points ne suit pas la tendance de la droite de régression. Nous en déduisons que cette paire de variables aléatoires n’est pas exploitable, et nous décidons donc de l’écarter.
+
+Après avoir transformé les variables qualitatives discrètes (sous forme de chaînes de caractères) en variables numériques. Toutefois, ces transformations ne nous ont pas permis d’obtenir des résultats véritablement exploitables. Cela notament due fait que ces variables ne sont pas des données discrètes ordonnées, ce qui est le cas pour l'ensemble des données discretes qui sont fournis dans le fichier.
+
+Maintenant, il ne nous reste plus qu’à vérifier la corrélation entre les variables continues présentes dans le jeu de données.
+Mais avant cela, voici deux fonctions que nous allons utiliser pour la suite de cette question. Ces fonctions permettent, de manière simple, de représenter la corrélation entre l’ensemble des couples possibles et de renvoyer ceux qui respectent un seuil minimal de corrélation spécifié en paramètre (threshold).
+
+```{r, echo=FALSE}
+#' Recherche tous les couples de variables dont la corrélation 
+#'     est supérieure ou égale au pourcentage fourni, ou négativement
+#'     inférieure ou égale.
+#' @param data_ Un data.frame contenant les données à analyser.
+#' @param headers Un vecteur de noms de colonnes (ou d'indices) sur 
+#'     lesquelles calculer les corrélations.
+#' @param threshold Un seuil numérique (entre 0 et 1) au-dessus duquel
+#'     la corrélation est considérée comme élevée.
+#' @return Une liste contenant :
+#'   - pairs : les indices des paires de variables hautement corrélées
+#'   - cors : la matrice complète des corrélations
+get_high_correlations <- function (data_, headers, threshold) {
+  data <- data_ # Copie de données
+  cors <- cor(data[, headers])
+  cors[lower.tri(cors, diag=TRUE)] <- 0
+  high_cor_mask <- cors >= threshold | cors <= -threshold
+  pairs <- which(high_cor_mask, arr.ind = TRUE)
+  list(pairs = pairs, cors = cors)
+}
+
+#' Affiche les paires de variables avec leur coefficient de corrélation.
+#' @param pairs_ Matrice d’indices 
+#' @param cors_ Matrice de corrélation
+display_high_correlations <- function (pairs_, cors_) {
+  for(i in seq_len(nrow(pairs_))) {
+    row <- pairs_[i, "row"]
+    col <- pairs_[i, "col"]
+    cat(
+      rownames(cors_)[row], "-", colnames(cors_)[col], ": ", cors_[row, col], "\n"
+    )
+  }
+}
+```
+
+```{r, echo=FALSE}
+car_cor <- get_high_correlations(
+  car_data, 
+  c("Prix", "Km", "Litre"), 
+  0.1)
+  
+display_high_correlations(car_cor$pairs, car_cor$cors)
+```
+Nous voyons ici que la corrélation la plus élevée est d’environ 56 %, ce qui, à première vue, n’est pas suffisant pour réaliser une modélisation par régression linéaire simple.
+Nous pouvons alors en conclure que le fichier contenant des données sur les voitures n’est pas exploitable, au vu des résultats obtenus.
+
+#### Analyse du fichier `bodyfat.dat`
+```
+bodyfat_cor <- get_high_correlations(
+  bodyfat_data,
+  c("Triceps", "Fat", "Midarm", "Thigh"),
+  0.7)
+
+display_high_correlations(bodyfat_cor$pairs, bodyfat_cor$cors)
+```
+
+En regardant les coefficients de corrélation des données issues de bodyfat.dat, nous remarquons qu’ils sont assez élevés. Cependant, nous avons également écarté ces données car nous considérons qu’elles sont trop peu nombreuses pour une modélisation de régression linéaire simple.
+
+
+#### Analyse du fichier `happiness_csv.csv`
+
+```{r, echo=FALSE}
+happiness_cor <- get_high_correlations(
+  happiness_data, 
+  c("Happiness.Score", "Standard.Error", "Economy..GDP.per.Capita.", "Family", 
+    "Health..Life.Expectancy.", "Freedom", "Trust..Government.Corruption.", 
+    "Generosity", "Dystopia.Residual"), 
+  0.7)
+  
+display_high_correlations(happiness_cor$pairs, happiness_cor$cors)
+```
+
+Finalement, nous avons choisi la paire `Economy (GDP per Capita)` et `Happiness.Score`, qui présente le coefficient de corrélation de Pearson le plus élevé, juste après le couple `Economy..GDP.per.Capita.` et `Health..Life.Expectancy..`
+En traçant les nuages de points correspondants (voir les régressions linéaires ci-dessous), nous observons que le second nuage de points a une dispersion plus marquée vers le haut que vers le bas, tandis que, à l’inverse, le premier couple suit une tendance plus alignée avec la droite des moindres carrés.
+
+```{r, echo=FALSE}
+display_high_correlations(happiness_cor$pairs, happiness_cor$cors)
+plot(happiness_data$Economy..GDP.per.Capita., happiness_data$Happiness.Score)
+abline(lm(happiness_data$Happiness.Score~happiness_data$Economy..GDP.per.Capita.))
+plot(happiness_data$Economy..GDP.per.Capita., happiness_data$Health..Life.Expectancy.)
+abline(lm(happiness_data$Health..Life.Expectancy.~happiness_data$Economy..GDP.per.Capita.))
+```
+
+## 4.2 Estimation ponctuelle et par IC des paramètres
+
+### Question 18
+```{r, echo=FALSE}
+x_real <- happiness_data$Economy..GDP.per.Capita.
+y_real <- happiness_data$Happiness.Score
+
+par(mfrow = c(1, 1))
+display_model <- function(x_, y_, title_) {
+  a_hat <- a_estim(x_, y_)
+  cat("Estimation parametre a:", a_hat, "\n")
+  b_hat <- b_estim(x_, y_)
+  cat("Estimation parametre b:", b_hat, "\n")
+
+  model <- lm(y_ ~ x_) # fournis les meme valeur (10e-3 pres) à que ceux estimer nous meme
+  plot(x_, y_, main = title_)
+  abline(a_hat, b_hat, col = "red", lwd = 6, lty = 1)
+  abline(model, col = "green", lwd = 2, lty = 5)
+
+  return(model)
+}
+
+model <- display_model(x_real, y_real, "Happinness score, en fonction du PIB")
+
+```
+
+Lorsque nous traçons la droite des moindres carrés ainsi que celle calculée par nos fonctions d’estimations, nous remarquons que les deux droites sont alignées : nos estimations sont donc correctes.
+De plus, la répartition des données suit la tendance générale de la courbe, ce qui rend le modèle de régression linéaire envisageable.
+
+### Question 19
+Estimation des intervales de confiances, avec lafonction `confint`.
+```{r, echo=FALSE}
+Yi_real <- a_estim(x_real, y_real) + b_estim(x_real, y_real) * x_real
+hp_m_IC <- confint(model, level = 0.05)
+print("Estimation des parametre du modeles par intervalle de confiances")
+print(hp_m_IC)
+```
+
+Maintenant que nous avons nos intervalles, il s'agit de vérifier si nos estimations (obtenues avec les fonctions que nous avons développées) se trouvent bien à l'intérieur de ces intervalles.
+
+```{r, echo=FALSE}
+# verifions si a et b appartient a leur IC respective
+a_estime_real <- a_estim(x_real, y_real)
+b_estime_real <- b_estim(x_real, y_real)
+cat("a = ", a_estime_real, " est dans IC: ", a_estime_real >= hp_m_IC[1,][1] & a_estime_real <= hp_m_IC[1,][2], "\n")
+cat("b = ", b_estime_real, " est dans IC: ", b_estime_real >= hp_m_IC[2,][1] & b_estime_real <= hp_m_IC[2,][2], "\n")
+```
+
+## 4.3 Qualité de l’ajustement
+
+### Question 20
+Nous rappelons que le calcul du coefficient de détermination se fait de la manière suivante :
+$$ R^2 = \frac{S_{\text{reg}}}{S_Y^2} \text{, avec}$$
+
+$$ S_{\text{reg}} = \frac{1}{n} \sum_{i=1}^n (\widehat{Y}_i - \overline{Y})^2 \text{, } S_{\text{res}} = \frac{1}{n} \sum_{i=1}^n (Y_i - \widehat{Y}_i)^2 $$
+
+$$ S_Y^2 = \frac{1}{n} \sum_{i=1}^n (Y_i - \overline{Y})^2 = S_{\text{reg}} + S_{\text{res}} $$
+
+```{r, echo=FALSE}
+Yi_real <- a_estim(x_real, y_real) + b_estim(x_real, y_real)*x_real
+
+n_q20 <- length(Yi_real)
+
+Sreg <- (1 / n_q20) * sum((Yi_real - mean(y_real))^2)
+Sres <- (1 / n_q20) * sum((y_real - Yi_real)^2)
+SY02 <- Sreg + Sres
+Rsquare <- Sreg / SY02
+print(Rsquare)
+```
+
+On remarque alors qu’environ 60,99 % de la variance est expliquée par la droite des moindres carrés, c’est-à-dire qu’environ 60,99 % des variations de $y$ sont expliquées par $x$.
+
+### Question 21
+
+Vérification du calcul de $R^2$ avec:
+$$
+R^2 = \frac{s_{xy}^2}{s_x^2s_y^2} = (\text{correlation empirique entre } x \text{ et } y)^2
+$$
+
+$$
+\text{où } s_{xy}^2 = \left(\frac{1}{n}\sum_{i=1}^n x_iy_i\right)-\bar{x}\bar{y} \text{, } s_x^2 = \frac{1}{n}\sum_{i=1}^n x_i^2 -\bar{x}^2 \text{ et } s_y^2 = \frac{1}{n}\sum_{i=1}^n y_i^2 -\bar{y}^2
+$$
+
+```{r, echo=FALSE}
+print(cov(x_real, y_real)^2 / (var(x_real) * var(y_real)))
+print(cor(x_real, y_real)^2)
+```
+
+Nous voyons bien ici que les trois calculs correspondent au même résultat.
+
+### Question 22
+Pour cette question, on pose: $H_0: b = b_0 = 0$, contre $H_1: b = b_1 \neq b_0$ avec $\alpha = 0.05$
+
+Pour des soucis de variable, nous allons nommer $b_{real} = b$ et $b_{0real} = b_0$
+
+Nous avons dans un premier temps calculé une réalisation de 
+$$
+\frac{\hat{b} - b}{\sqrt{\frac{\hat{\sigma}^2}{n s_x^2}}}
+$$
+
+Nous cherchons alors une région critique, tel que:
+$$
+P_{H_0}(\frac{\hat{b} - b}{\sqrt{\frac{\hat{\sigma}^2}{n s_x^2}}} > c) = \alpha \text{, avec } c = t_{n - 2,\,1 - \frac{\alpha}{2}}
+$$
+
+```{r, echo=FALSE}
+b0_real <- 0
+b_real <- b0_real
+m <- length(x_real)
+T_real <- (b_estime_real - b_real) / sqrt(sigma_estim(x_real, y_real) / (m * var(x_real)))
+alpha_start <- 0.05
+W <- pm(qt(1 - alpha_start / 2, df = m - 2))
+
+cat("La region critique W est alors de : \nW:={", W[1], "> T >", W[2], "}\n")
+cat("Notre T =", T_real, "tombe dans :\nW:={ T >", W[2], "}\n")
+```
+
+Le risque de première espèce nous indique que sous $H_0$, la probabilité d’observer $T > 1.975$ est de 5%.
+Or ici, T est significativement supérieur, nous rejetons alors formellement l’hypothèsee $H_0$. Donc le modèle de régression linéaire simple est justifié.
+
+De plus, nous pouvons appuyer ce propos en calculant la p-value :  
+$$P_{H_0}(T > 15.66711) = 1 - P_{H_0}(T \le 15.66711) = P_{H_0}(T \le -15.66711)$$
+
+```{r, echo=FALSE}
+p_value <- 2 * pt(-15.66711, df = m - 2)
+print(p_value)
+```
+
+Nous voyons là que la p-value est proche de 0, donc sous $H_0$, il serait quasiment impossible d’observer une valeur supérieure ou égale à 15.66711, on rejete alors $H_0$.
+La p-value vient alors renforcer l’existence du coefficient directeur de la régression, et donc la validité du modèle de régression linéaire simple, c'est à dire le rejet de $H_0$ et la conservation de $H_1$.
+
+### Question 23
+
+**Normalité**
+```R
+test_normalite <- function(x_, y_) {
+  e_real <- rstandard(lm(y_ ~ x_))
+  qqnorm(e_real, main = "QQ-plot des residus standardises ")
+  qqline(e_real, col = "red")
+}
+
+test_normalite(x_real, y_real)
+```
+
+Nous remarquons ici que la grande majorité des points (résidus) suit la tendance de la droite. La distribution des résidus par rapport à une loi normale est acceptable.
+
+### Question 24
+
+**Homoscédasticité**
+```R
+test_homoscedasticite <- function(x_, y_) {
+  reg <- lm(y_~x_)
+  res <- rstandard(reg)
+  
+  plot(x_, res,
+       main = "Test d'homoscédasticité",
+       xlab = "Variable explicative (PIB)",
+       ylab = "Résidus standardisés",
+       pch = 20,
+       col = "blue")
+  
+  abline(h = 0, col = "red", lty = 2)
+}
+
+test_homoscedasticite(x_real, y_real)
+```
+Sur le nuage de points, on observe globalement une répartition aléatoire des valeurs. En traçant la droite $y = 0$, nous constatons une dispersion aléatoire autour de celle-ci, sans motif ni répétition identifiable.
+Nous pouvons donc conclure que, visuellement, les résidus corrigés semblent indépendants et valident l’hypothèse d’homoscédasticité.
+
+## 4.5 Prévision
+
+### Question 25
+
+#### Intervalle de confiance pour $\mathbb{E}(\hat{Y}_0)$
+
+D'après les résultats trouvés précédemment, nous savons que la modélisation par une régression linéaire simple semble valide. Nous avons alors la possibilité de l'utiliser afin de faire une prédiction pour une valeur $\hat{Y_0}$ en fonction de $x_0$.
+
+Afin de trouver l'intervalle de confiance de $Ŷ_0$, nous cherchons d'abord une fonction de pivot.
+
+On pose:
+$$
+\hat{Y}_0 = \hat{a} + \hat{b}x_0
+$$
+
+Nous avons:
+
+$$
+Ŷ_0 \sim \mathcal{N}(E(\hat{Y}_0), Var(\hat{Y}_0))
+\iff \frac{\hat{Y}_0 - E(\hat{Y}_0)}{\sqrt{Var(\hat{Y}_0)}} \sim \mathcal{N(0, 1)}\newline
+$$
+
+Avec $Var(Ŷ_0)$ tel que:
+
+$$
+\begin{align*}
+Var(Ŷ_0) &= Var(\hat{a}) + x_0^2 \cdot Var(\hat{b}) + 2x_0 \cdot Cov(\hat{a}, \hat{b})\newline
+&= \frac{\sigma^2}{n} \cdot (1 + \frac{(x_0 - \bar{x})^2}{s^2_x})
+\end{align*}
+$$
+
+Cependant, $\sigma^2$ est inconnue, nous la remplaçons donc dans notre expression par l'estimateur sans biais $\hat{\sigma}^2$, tel que:
+
+$$
+\begin{align*}
+\hat{\sigma}^2 &= \frac{1}{n-2} \sum_{i=1}^{n} (Y_i - \hat{a} - \hat{b}x_i)^2 \newline
+\end{align*}
+$$
+
+On note aussi que :
+
+$$
+\frac{\hat{\sigma}^2}{\sigma^2}(n-2) \sim \chi_{n-2}^2
+$$
+
+Notre fonction pivot $\pi$ a donc pour forme:
+
+$$
+\begin{align*}
+\pi = \frac{\hat{Y}_0 - E(\hat{Y}_0)}{\hat{\sigma}\sqrt{\frac{1}{n} \cdot (1 + \frac{(x_0 - \bar{x})^2}{s^2_x})}}
+\end{align*}
+$$
+
+Nous souhaitons retrouver la loi de $\pi$, pour cela, nous essayons de l'exprimer sous la forme:
+
+$$
+\frac{U}{\sqrt{\frac{Ch}{d}}} \sim \mathcal{t}_d
+$$
+
+où $U \sim \mathcal{N}(0, 1)$, et $Ch \sim \chi_d^2$.
+
+On pose:
+
+$$
+U = \frac{\hat{Y}_0 - E(\hat{Y}_0)}{\sigma\sqrt{\frac{1}{n}(1 + \frac{(x_0 - \bar{x})^2}{s^2_x})}}
+$$
+
+ainsi que , $d = n - 2$ et :
+
+$$
+\begin{align*}
+Y &= \frac{\hat{\sigma}^2}{\sigma^2}(n-2)\newline
+\iff \hat{\sigma} &= \sigma \sqrt{\frac{Ch}{n-2}}
+\end{align*}
+$$
+
+En remplaçant $\hat{\sigma}^2$ par cette nouvelle définition, on obtient bien:
+
+$$
+\pi = \frac{1}{\sqrt{\frac{Ch}{n-2}}} \cdot \frac{Ŷ_0 - E(Ŷ_0)}{\sigma \sqrt{\frac{1}{n} \cdot (1 + \frac{(x_0 - \bar{x})^2}{s^2_x})}} = \frac{U}{\sqrt{\frac{Ch}{d}}} \sim \mathcal{t}_{n-2}
+$$
+
+Soit $\alpha$ tel que  $0 \leq \alpha \leq 1$, et 1 - $\alpha$ le niveau de confiance, alors pour trouver notre intervalle de confiance on pose:
+
+$$
+P(|\pi| \leq k) = 1 - \alpha
+$$
+
+La loi de Student étant symétrique autour de 0, nous avons $k = \mathcal{t}_{n - 2, 1 - \frac{\alpha}{2}}$. Nous pouvons donc retrouver l'intervalle exacte:
+
+$$
+\begin{align*}
+P(&|\pi| \leq k) = 1 - \alpha\newline
+\iff & |\pi| \leq \mathcal{t}_{n - 2, 1 - \frac{\alpha}{2}}\newline
+\iff &IC = [Ŷ_0 \pm \mathcal{t}_{n - 2, 1 - \frac{\alpha}{2}} \cdot \hat{\sigma}\sqrt{\frac{1}{n} \cdot (1 + \frac{(x_0 - \bar{x})^2}{s^2_x})}]
+\end{align*}
+$$
+
+```{r}
+intervalle_confiance <- function(model, x0, alpha = 0.05) {
+  x_real <- model$model[, 2]
+  y_real <- model$model[, 1]
+  n_real <- length(x_real)
+  x_bar_real <- mean(x_real)
+  s_xx_real <- sum((x_real - x_bar_real)^2)
+  sigma_hat_real <- summary(model)$sigma
+  
+  t_crit <- qt(1 - alpha / 2, df = n_real - 2)
+  
+  y_hat_0 <- predict(model, newdata = data.frame(x_real = x0))
+  
+  se_conf_factor <- sqrt((1/n_real) + ((x0 - x_bar_real)^2 / s_xx_real))
+  marge_erreur_conf <- t_crit * sigma_hat_real * se_conf_factor
+  
+  ic_inf <- y_hat_0 - marge_erreur_conf
+  ic_sup <- y_hat_0 + marge_erreur_conf
+  
+  cat("Pour x0 =", round(x0, 3), ":\n")
+  cat("Valeur prédite Y_hat_0 =", round(as.numeric(y_hat_0), 3), "\n")
+  cat("Intervalle de confiance à", (1 - alpha) * 100, "% pour E(Y0) : [", 
+      round(ic_inf, 3), "; ", round(ic_sup, 3), "]\n")
+}
+```
+
+### Intervalle de prédiction pour une nouvelle observation $Y_0$ à $x_0$
+
+Cet intervalle donne une plage de valeurs plausibles pour une seule nouvelle observation $Y_0$. Il doit prendre en compte non seulement l'incertitude sur la droite de régression, mais aussi la variabilité inhérente à une nouvelle observation (le terme d'erreur $\epsilon_0$). Cet intervalle sera donc toujours plus large que l'intervalle de confiance pour la moyenne.
+
+
+
+Pour l'intervalle de prédiction de $Y_0$, on s'intéresse à l'erreur de prédiction $Y_0 - \hat{Y}_0$.
+
+On a $\mathbb{E}[Y_0 - \hat{Y}_0] = 0$ et  $\mathrm{Var}(Y_0 - \hat{Y}_0) = \mathrm{Var}(Y_0) + \mathrm{Var}(\hat{Y}_0)$ (car $Y_0$ est une nouvelle observation indépendante des données ayant servi à estimer $\hat{Y}_0$).
+
+Avec $Sxx = n\cdot s^2_x$, on peut réécrir $\mathrm{Var}(Y_0 - \hat{Y}_0)$ comme étant:
+$$
+\begin{align*}
+&\mathrm{Var}(Y_0 - \hat{Y}_0)\newline
+= &\sigma^2 + \sigma^2 \left( \frac{1}{n} + \frac{(x_0 - \bar{x})^2}{S_{xx}} \right)\newline
+= &\sigma^2 \left( 1 + \frac{1}{n} + \frac{(x_0 - \bar{x})^2}{S_{xx}} \right)
+\end{align*}
+$$
+
+La quantité pivotale pour l'intervalle de prédiction de $Y_0$ est :
+$$ T_{pred} = \frac{Y_0 - \hat{Y}_0}{\hat{\sigma} \sqrt{1 + \frac{1}{n} + \frac{(x_0 - \bar{x})^2}{S_{xx}}}} \sim t_{n-2} $$
+L'intervalle de prédiction à $1-\alpha$ pour $Y_0$ est :
+$$ \hat{Y}_0 \pm t_{n-2, 1-\alpha/2} \cdot \hat{\sigma} \sqrt{1 + \frac{1}{n} + \frac{(x_0 - \bar{x})^2}{S_{xx}}} $$
+
+```{r}
+
+intervalle_prediction <- function(model, x0, alpha = 0.05) {
+  x_real <- model$model[, 2]
+  y_real <- model$model[, 1]
+  n_real <- length(x_real)
+  x_bar_real <- mean(x_real)
+  s_xx_real <- sum((x_real - x_bar_real)^2)
+  sigma_hat_real <- summary(model)$sigma
+  
+  t_crit <- qt(1 - alpha / 2, df = n_real - 2)
+  
+  y_hat_0 <- predict(model, newdata = data.frame(x_real = x0))
+  
+  se_pred_factor <- sqrt(1 + (1/n_real) + ((x0 - x_bar_real)^2 / s_xx_real))
+  marge_erreur_pred <- t_crit * sigma_hat_real * se_pred_factor
+  
+  ip_inf <- y_hat_0 - marge_erreur_pred
+  ip_sup <- y_hat_0 + marge_erreur_pred
+  
+  cat("Pour x0 =", round(x0, 3), ":\n")
+  cat("Valeur prédite Y_hat_0 =", round(as.numeric(y_hat_0), 3), "\n")
+  cat("Intervalle de prédiction à", (1 - alpha) * 100, "% pour Y0 : [", 
+      round(ip_inf, 3), "; ", round(ip_sup, 3), "]\n")
+}
+
+```
+
+On a déjà le modèle `model <- display_model(x_real, y_real, "Happinness score, en fonction du PIB")`.
+Nous allons choisir deux nouvelles valeurs pour $x_0$. Par exemple, une valeur proche de la moyenne des $x_{\text{real}}$ et une valeur un peu plus éloignée.
+
+```{r}
+calcul_intervalles <- function(model, x0_valeurs, alpha = 0.05) {
+  cat("Calcul des intervalles pour alpha =", alpha, "(niveau", (1-alpha)*100, "%)\n")
+  
+  x_real <- model$model[, 2]
+  n_real <- length(x_real)
+  t_crit_pred <- qt(1 - alpha / 2, df = n_real - 2)
+  
+  cat("t critique (df=", n_real-2, "): ", round(t_crit_pred, 4), "\n\n", sep="")
+  
+  for (x0_current in x0_valeurs) {
+    intervalle_confiance(model, x0_current, alpha)
+    intervalle_prediction(model, x0_current, alpha)
+    cat("\n")
+  }
+}
+```
+```{r}
+model <- lm(y_real ~ x_real)
+x0_valeurs <- c(1.0, 1.5)
+calcul_intervalles(model, x0_valeurs)
+```
+### Résultats pour les valeurs de prédiction
+
+#### Pour x₀ = 1.0
+
+| Type d'intervalle | Valeur prédite | Borne inférieure | Borne supérieure |
+|-------------------|----------------|------------------|------------------|
+| **Confiance (95%)** pour E(Y₀) | 5.717 | 5.596 | 5.838 |
+| **Prédiction (95%)** pour Y₀ | 5.717 | 4.295 | 7.139 |
+
+#### Pour x₀ = 1.5
+
+| Type d'intervalle | Valeur prédite | Borne inférieure | Borne supérieure | 
+|-------------------|----------------|------------------|------------------|
+| **Confiance (95%)** pour E(Y₀) | 6.826 | 6.611 | 7.041 |
+| **Prédiction (95%)** pour Y₀ | 6.826 | 5.393 | 8.260 |
+
+Pour en traçant le point sur le graphique, il est possible de distinguer ce celui-ci ce fond bien parmis les autres.
+
+## 4.6 Conclusion
+
+### Question 26
+
+Nous pouvons donc en conclure que la modélisation du PIB et du Happiness score en tant que variable explicante et variable expliquée est pertinante. L'application de la regression linéraire nous permets de prédire des données avec de intervalles de confiance et de prédiction précis.
